@@ -1,0 +1,71 @@
+Title: bias adjusted 3 step model
+
+Data:
+  File is 4k_smfq_cprob_ba.txt ;
+  
+Variable:
+  Names are id sex age ADHD ASD 
+  BIP MDD ANX NEU SCZ comm hier
+  mood neuro psych
+  pc1 pc2 pc3 pc4 pc5 pc6 c_relab;
+     
+  Missing are all (-9999.0); 
+
+  usevariables are sex psych
+  	pc1 pc2 pc3 pc4 pc5 pc6 c_relab;
+ 
+  nominal= c_relab;
+  classes=x(4);
+
+  Analysis:
+  proc=4(starts);
+  starts = 1000 100;
+  type = mixture;
+
+  Model:
+  %overall%
+
+  x#1 on psych (lorc1v4_a);
+  x#2 on psych (lorc2v4_a);
+  x#3 on psych (lorc3v4_a);
+  x#1 on sex (lorc1v4_b);
+  x#2 on sex (lorc2v4_b);
+  x#3 on sex (lorc3v4_b);
+  x#1 on pc1 (lorc1v4_z);
+  x#2 on pc1 (lorc2v4_z);
+  x#3 on pc1 (lorc3v4_z);
+  x#1 on pc2 (lorc1v4_d);
+  x#2 on pc2 (lorc2v4_d);
+  x#3 on pc2 (lorc3v4_d);
+  x#1 on pc3 (lorc1v4_e);
+  x#2 on pc3 (lorc2v4_e);
+  x#3 on pc3 (lorc3v4_e);
+  x#1 on pc4 (lorc1v4_f);
+  x#2 on pc4 (lorc2v4_f);
+  x#3 on pc4 (lorc3v4_f);
+  x#1 on pc5 (lorc1v4_g);
+  x#2 on pc5 (lorc2v4_g);
+  x#3 on pc5 (lorc3v4_g);
+  x#1 on pc6 (lorc1v4_h);
+  x#2 on pc6 (lorc2v4_h);
+  x#3 on pc6 (lorc3v4_h);
+
+
+  %x#1%
+  [c_relab#1@1.1406302 c_relab#2@-1.9706182 c_relab#3@-2.5761001];
+
+  %x#2%
+  [c_relab#1@-3.2053088 c_relab#2@.24147895 c_relab#3@-3.0690273];
+
+  %x#3%
+  [c_relab#1@-2.2658583 c_relab#2@-2.557634 c_relab#3@1.238076];
+
+  %x#4%
+  [c_relab#1@-4.9726397 c_relab#2@-4.7644102 c_relab#3@-5.0278904];
+
+
+model test:
+
+lorc1v4_a = 0;
+lorc2v4_a = 0;
+lorc3v4_a = 0;

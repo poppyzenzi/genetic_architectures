@@ -1,0 +1,298 @@
+library(dplyr)
+library(tidyr)
+library(data.table)
+library(ggplot2)
+library(nnet) 
+
+## ALSPAC class data, smfq scores, PRS: sensitivity and attrition analyses
+
+##################### load and inspect data ##################### 
+
+# read in smfq scores with class labs - genetic subjects only 
+setwd('/Users/poppygrimes/Library/CloudStorage/OneDrive-UniversityofEdinburgh/Edinburgh/')
+smfq_gen_class <- read.csv('./gmm/gmm_alspac/smfq_gen_only_class_labs')
+smfq_gen_class_subset <- subset(smfq_gen_class, select = -c(age,ethnicity))
+
+## first check which class is which trajectory
+# Convert 'class' and 'eventname' to factors for proper ordering
+smfq_gen_class_subset$class <- factor(smfq_gen_class_subset$class)
+smfq_gen_class_subset$time <- factor(smfq_gen_class_subset$time)
+
+# Calculate mean SMFQ for each 'class' at different 'time'
+smfq_table <- smfq_gen_class_subset %>%
+  group_by(time, class) %>%
+  summarise(mean_smfq = mean(dep, na.rm = TRUE)) %>%
+  tidyr::pivot_wider(names_from = class, values_from = mean_smfq)
+
+# Print the resulting table
+print(smfq_table)
+
+############################################################### 
+
+#################### make wide df and QC ######################
+
+# make wide
+wide_data <- pivot_wider(smfq_gen_class_subset, id_cols = c("IID", "SubjectNumeric", "sex", "class"),
+                         names_from = time, values_from = dep)
+# rename cols
+colnames(wide_data)[5:ncol(wide_data)] <- paste0("smfq_", colnames(wide_data)[5:ncol(wide_data)])
+
+# read in PRS
+setwd("./prs/prs_alspac_OUT/all_thresholds")
+csvs <- c('alspac_mdd_ipsych_prs_0816.t2.best', 'alspac_neu_prs_0813.t3.best','alspac_meta_anx_prs_0813.t3.best',
+          'alspac_scz_prs_0813.t3.best', 'alspac_bip_prs_0813.t2.best',
+          'alspac_adhd_23_prs_0813.t3.best', 'alspac_asd_prs_0813.t3.best', 
+          'alspac_mood_prs1221.t3.best', 'alspac_psychotic_prs1221.t3.best', 'alspac_neurodev_prs1221.t3.best',
+          'alspac_cf_prs_0817.t2.best', 'alspac_high_prs_0817.t2.best'
+)
+
+# Create an empty list to store dataframes
+prs_data_list <- list()
+
+# iterate over each file
+for (csv_file in csvs) {
+  df <- read.table(csv_file, header = TRUE)
+  df <- df[, c('IID', 'PRS')]
+  col_prefix <- strsplit(csv_file, "_")[[1]][2]  # extract the prefix of the column name from the file name
+  col_prefix2 <- toupper(col_prefix) # capitalise
+  setnames(df, c('PRS'), paste0(col_prefix2))  # rename the second column to the appropriate prefix
+  prs_data_list[[col_prefix]] <- df  # Store each PRS dataframe in the list
+}
+
+# Combine all PRS dataframes into a single dataframe based on IID column
+combined_prs_data <- Reduce(function(x, y) merge(x, y, by = 'IID', all.x = TRUE), prs_data_list)
+combined_prs_data$ancestry <- 'EUR'
+
+# Merge with smfq_gen_class by IID
+merged_data <- merge(wide_data, combined_prs_data, by = 'IID')
+
+# rename PRS columns
+setnames(merged_data, c('META', 'CF', 'HIGH'), c('ANX', 'COMMON', 'HIERARCHICAL'))
+
+############################################################### 
+########### regression of each PRS with smfq_1-4 #############
+
+df <- merged_data
+
+# Initialize an empty dataframe to store the regression results
+results <- data.frame()
+
+# Loop through each PRS column
+for (i in 9:20) {
+  prs_name <- colnames(df)[i]
+  # Loop through each smfq column
+  for (j in 5:8) {
+    smfq_name <- colnames(df)[j]
+    # Run linear regression
+    lm_result <- lm(scale(df[, j]) ~ scale(df[, i]))  # Standardize predictors and outcome
+    
+    # Store the results in a dataframe
+    result_row <- data.frame(
+      PRS = prs_name,
+      SMFQ_Time = smfq_name,
+      Coefficients = coef(lm_result)[2],
+      p_value = summary(lm_result)$coefficients[2, 4]
+    )
+    # Append the results to the overall dataframe
+    results <- rbind(results, result_row)
+  }
+}
+
+# Calculate confidence intervals for coefficients
+results$lower_ci <- NA
+results$upper_ci <- NA
+
+for (index in 1:nrow(results)) {
+  prs <- results$PRS[index]
+  smfq <- results$SMFQ_Time[index]
+  # Subset data for each PRS and SMFQ combination
+  subset_data <- df[, c(prs, smfq)]
+  subset_data <- subset_data[complete.cases(subset_data), ]  # Remove rows with NA
+  # Run linear regression
+  lm_result <- lm(scale(subset_data[, 2]) ~ scale(subset_data[, 1]))  # Standardize predictors and outcome
+  # Calculate confidence intervals
+  conf_int <- confint(lm_result)[2, ]
+  results$lower_ci[index] <- conf_int[1]
+  results$upper_ci[index] <- conf_int[2]
+}
+
+# Specify the order of the PRS variable
+prs_order <- c("ANX", "NEU", "MDD", "BIP", "SCZ", "ADHD", "ASD", "MOOD", "PSYCHOTIC", "NEURODEV", "COMMON", "HIERARCHICAL")
+
+# Convert PRS to a factor with the desired order
+results$PRS <- factor(results$PRS, levels = prs_order)
+
+# plot with confidence intervals
+ggplot(results, aes(x = PRS, y = Coefficients, color = SMFQ_Time)) +
+  geom_point(position = position_dodge(width = 0.5)) +  # Adding separation between points
+  geom_errorbar(aes(ymin = lower_ci, ymax = upper_ci), 
+                width = 0.2, 
+                position = position_dodge(width = 0.5)) +  # Separation between error bars
+  labs(title = "Coefficients of PRS vs. SMFQ_Time",
+       x = "Polygenic Risk Score (PRS)",
+       y = "Betas") +
+  theme_minimal()
+
+######################################################################
+########## now do the same for number of responses ###########
+
+# Calculate the sum of non-NA values in columns 5 to 8 and create a new column 'missed_surveys'
+merged_data$missed_surveys <- rowSums(is.na(merged_data[, 5:8]))
+
+# Initialize an empty dataframe to store the regression results
+df2 <- merged_data
+# Initialize an empty dataframe to store results
+results2 <- data.frame(PRS = character(),
+                       Beta_Coefficient = numeric(),
+                       p_value = numeric(),
+                       lower_ci = numeric(),
+                       upper_ci = numeric())
+
+# Loop through each PRS column
+for (i in 9:20) {
+  prs_name <- colnames(df2)[i]
+  # Subset the data to rows with non-NA missed_surveys for the current PRS and missed_surveys columns
+  subset_data <- df2[!is.na(df2$missed_surveys) & !is.na(df2[, i]), ]
+  # Standardize predictors and missed surveys variable
+  scaled_data <- scale(subset_data[, c('missed_surveys', prs_name)])
+  # Run linear regression
+  lm_result <- lm(scaled_data[, 1] ~ scaled_data[, 2])
+  # Store the results in a dataframe
+  result_row <- data.frame(
+    PRS = prs_name,
+    Beta_Coefficient = coef(lm_result)[2],
+    p_value = summary(lm_result)$coefficients[2, 4],
+    # Calculate confidence intervals
+    lower_ci = confint(lm_result)[2, 1],
+    upper_ci = confint(lm_result)[2, 2]
+  )
+  results2 <- rbind(results2, result_row)
+}
+
+# Print the table of regression results
+print(results2)
+
+results2$PRS <- factor(results2$PRS, levels = prs_order)
+
+# plot results2 with error bars
+ggplot(results2, aes(x = PRS, y = Beta_Coefficient)) +
+  geom_point(size = 3) +
+  theme_minimal() +
+  geom_errorbar(aes(ymin = lower_ci, ymax = upper_ci), width = 0.2) +
+  labs(title = "PRS vs. # missed surveys", x = "Polygenic Risk Score (PRS)", y = "Beta Coefficient")
+
+##########################################################################
+#################### inspect missing data (attrition) ####################
+
+# Count rows with 2 or more missing values in smfq_1 to smfq_4 columns
+
+missing_time_points <- data.frame()
+
+for (i in 1:4) {
+  missing_n_or_more <- rowSums(is.na(merged_data[, 5:12])) >= i
+  x <- sum(missing_n_or_more)
+  missing_time_points <- rbind(missing_time_points, data.frame(TimePoints = i, Count = x))
+}
+
+missing_time_points
+
+##########################################################################
+################### PRS x symptom level data ############################
+
+# not included in manuscript
+# not a longitudinal analysis, use long df and ignore time column, just each case
+
+# load data and correct IDs
+smfq_symp <- read.table("/Volumes/igmm/GenScotDepression/users/poppy/alspac/smfq_symptoms_qcd.txt", check.names = FALSE) 
+smfq_symp$id <- gsub("_","", smfq_symp$id) 
+colnames(smfq_symp)[colnames(smfq_symp) == "id"] <- "IID"
+
+
+# merge combined PRS data 
+symp_with_PRS <- merge(smfq_symp, combined_prs_data, by='IID')
+
+setnames(symp_with_PRS, c('META', 'CF', 'HIGH'), c('ANX', 'COMMON', 'HIERARCHICAL'))
+setnames(symp_with_PRS, c('01','02','03','04','05','06','07','08','09','10','11','12','13'),
+                      c('miserable or unhappy','didn`t enjoy anything', 'tired and did nothing','restless',
+                        'felt no good','cried a lot','poor concentration',
+                        'hated self','bad person', 'felt lonely', 'nobody loved me', 
+                        'never as good as other kids','did everything wrong'))
+         
+# make symptoms binary 
+# Assuming your data frame is named symp_with_PRS
+symp_with_PRS[, 3:15][symp_with_PRS[, 3:15] == 2] <- 1
+
+symptom_columns <- 3:15
+prs_columns <- 16:22
+
+# Initialize an empty dataframe to store the regression results
+results <- data.frame()
+
+# Loop through each PRS column
+for (i in 16:22) {
+  prs_name <- colnames(symp_with_PRS)[i]
+  # Loop through each smfq column
+  for (j in 3:15) {
+    smfq_name <- colnames(symp_with_PRS)[j]
+    # Run linear regression
+    lm_result <- lm((symp_with_PRS[, j]) ~ scale(symp_with_PRS[, i]))  # Standardize predictors and outcome
+    
+    # Store the results in a dataframe
+    result_row <- data.frame(
+      PRS = prs_name,
+      SMFQ_Symptom = smfq_name,
+      Coefficients = coef(lm_result)[2],
+      p_value = summary(lm_result)$coefficients[2, 4]
+    )
+    # Append the results to the overall dataframe
+    results <- rbind(results, result_row)
+  }
+}
+
+# Calculate confidence intervals for coefficients
+results$lower_ci <- NA
+results$upper_ci <- NA
+
+for (index in 1:nrow(results)) {
+  prs <- results$PRS[index]
+  smfq <- results$SMFQ_Symptom[index]
+  # Subset data for each PRS and SMFQ combination
+  subset_data <- symp_with_PRS[, c(prs, smfq)]
+  subset_data <- subset_data[complete.cases(subset_data), ]  # Remove rows with NA
+  # Run linear regression
+  lm_result <- lm((subset_data[, 2]) ~ scale(subset_data[, 1]))  # Standardize predictors and outcome
+  # Calculate confidence intervals
+  conf_int <- confint(lm_result)[2, ]
+  results$lower_ci[index] <- conf_int[1]
+  results$upper_ci[index] <- conf_int[2]
+}
+
+
+# Specify the order of the PRS variable
+prs_order <- c("ANX", "NEU", "MDD", "BIP", "SCZ", "ADHD", "ASD" 
+               #"MOOD", "PSYCHOTIC", "NEURODEV", "COMMON", "HIERARCHICAL"
+               )
+symptom_order <-  c('miserable or unhappy','didn`t enjoy anything', 'tired and did nothing','restless',
+                    'felt no good','cried a lot','poor concentration',
+                    'hated self','bad person', 'felt lonely', 'nobody loved me', 
+                    'never as good as other kids','did everything wrong')
+
+
+# Convert to a factor with the desired order
+results$PRS <- factor(results$PRS, levels = prs_order)
+results$SMFQ_Symptom <- factor(results$SMFQ_Symptom, levels = symptom_order)
+
+
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))  # Rotate x-axis labels
+
+ggplot(results, aes(x = Coefficients, y = SMFQ_Symptom, color = PRS)) +
+  geom_point(position = position_dodge(width = 0.5)) +
+  geom_errorbar(aes(xmin = lower_ci, xmax = upper_ci), 
+                width = 0.2, 
+                position = position_dodge(width = 0.5)) +
+  labs(title = "Coefficients of PRS vs. SMFQ_Symptom",
+       x = "Betas",
+       y = "SMFQ Symptom") +
+  theme_minimal() 
+
+

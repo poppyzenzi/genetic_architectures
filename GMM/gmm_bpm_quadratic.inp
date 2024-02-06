@@ -1,0 +1,68 @@
+TITLE: 
+GMM for abcd bpm depression data
+abcd release 5.0;
+
+DATA:
+    FILE IS abcd5.0_bpm_wide_8tp_gen_only.txt;
+
+VARIABLE:
+
+      names are id y0_5 y1 y1_5 y2 y2_5 y3 y3_5 y4;
+      usevariables are y0_5 y1 y1_5 y2 y2_5 y3 y3_5 y4;
+      missing are all (-9999);
+      idvariable is id;
+      classes = c (4);
+
+ANALYSIS: 
+	processors = 4 (starts);
+	type = mixture;
+	starts = 400 80;
+	!stiterations = 25;
+	!stscale = 25;
+
+MODEL:
+
+    %overall%
+    
+    i by y0_5@1 y1@1 y1_5@1 y2@1 y2_5@1 y3@1 y3_5@1 y4@1;
+   
+   s by y0_5@0.00 y1@0.053 y1_5@0.100 y2@0.163 y2_5@0.201 y3@0.252 y3_5@0.301 y4@0.368;
+
+    q by y0_5@0.000 y1@0.003 y1_5@0.010 y2@0.027 y2_5@0.040 y3@0.063 y3_5@0.090 y4@0.136;
+    
+    [y0_5@0 y1@0 y1_5@0 y2@0 y2_5@0 y3@0 y3_5@0 y4@0];
+    
+
+    [i s q];
+    i s q@0;
+    i with s;
+    i with q@0;
+    s with q@0;
+    
+    
+    %c#1% 
+    [i s q];
+    
+   %c#2% 
+    [i s q];
+    
+    %c#3% 
+    [i s q];
+    
+    %c#4% 
+   [i s q];
+    
+ !  %c#5% 
+  !  [i s q];
+
+
+   
+OUTPUT: 
+!tech11;
+
+PLOT: 
+type is plot3;
+ series = y0_5 y1 y1_5 y2 y2_5 y3 y3_5 y4 (s);
+
+!SAVEDATA: file is 4k_gmm_bpm_eur.txt;
+! save = cprobabilities;

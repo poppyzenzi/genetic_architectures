@@ -1,0 +1,67 @@
+title: 
+gmm
+for wide format alspac 
+depression data (up to t=4)
+
+data:
+    FILE IS alspac_smfq_gen_only.txt;
+
+variable:
+    names are mfq_t01 mfq_t02 mfq_t03 mfq_t04 
+    age_t01 age_t02 age_t03 age_t04 id;
+    usevariables are mfq_t01 mfq_t02 mfq_t03 mfq_t04;
+    missing are all (-9999); 
+    idvariable is id;
+    classes = c (4);
+
+analysis: 
+	processors = 4 (starts);
+	type = mixture;
+	starts = 400 80;
+	!stiterations = 25;
+	!stscale = 25;
+
+ 
+MODEL:
+    %overall%
+    i by mfq_t01@1 mfq_t02@1 mfq_t03@1 mfq_t04@1;
+    
+    s by mfq_t01@0 mfq_t02@0.215 mfq_t03@0.315 mfq_t04@0.605;
+    
+    q by mfq_t01@0 mfq_t02@0.046 mfq_t03@0.099 mfq_t04@0.366;
+    
+    
+    [mfq_t01@0 mfq_t02@0 mfq_t03@0 mfq_t04@0];
+    
+    [i s q];
+    i s q@0;
+    i with s;
+    i with q@0;
+    s with q@0;
+    
+  %c#1% 
+  [i s q]; 
+  
+  %c#2% 
+  [i s q]; 
+  
+   %c#3% 
+  [i s q]; 
+  
+  %c#4% 
+ [i s q];
+  
+  !%c#5% 
+  ![i s q]
+  
+
+OUTPUT: 
+!tech11;
+
+
+PLOT: type is plot3;
+  series = mfq_t01 mfq_t02 mfq_t03 mfq_t04 (s);
+
+!SAVEDATA: file is 4k_gmm_smfq_retest.txt;
+ ! save = cprobabilities;
+ 
